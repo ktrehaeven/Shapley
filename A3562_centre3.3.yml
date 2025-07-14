@@ -195,7 +195,7 @@ flag__2:
     flagger: tricolour
     tricolour:
       mode: manual
-      strategy: khruschev1.yaml
+      strategy: khruschev.yaml
   flag_autocorr:
     enable: true
   flag_shadow:
