@@ -1,2 +1,2 @@
-# Shapely
-For all my shapely scripts and issues
+# Shapley
+For all my shapley scripts and issues
