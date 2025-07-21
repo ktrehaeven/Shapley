@@ -1,0 +1,185 @@
+schema_version: 1.1.3
+
+general:
+  prefix: run2
+  rawdatadir: '/net/crosby/home/trehaeven/shapley/SC_UHF/msdir'
+
+getdata:
+  dataid: ['SC_UHF']
+  extension: ms
+
+obsconf:
+  refant: '0'
+  target: ["J1331-3140"]
+  gcal: ["J1311-2216"]
+  bpcal: ["J1939-6342"]
+  fcal: ["J1939-6342"]
+
+transform:
+  enable: true
+  field: calibrators
+  label_out: cal2
+  split_field:
+    enable: true
+    col: data
+
+prep:
+  enable: true
+  label_in: cal2
+  field: calibrators
+  clearcal:
+    enable: true
+    addmodel: true
+                    
+flag:
+  enable: true
+  field: calibrators
+  label_in: cal2
+  flag_autocorr:
+    enable: true
+  flag_shadow:
+    enable: true
+  flag_scan:
+    enable: true
+    scans: "16"
+  flag_antennas:
+    enable: true
+    antennas: 'm008'
+  flag_spw:
+    enable: true
+    chans: '*:544~575MHz,*:1005~1088MHz'
+    ensure_valid: false
+  flag_rfi:
+    enable: true
+    flagger: tricolour
+    tricolour:
+      mode: manual
+      strategy: gorbachev.yaml
+  report: true
+                        
+crosscal:
+  enable: true
+  label_in: cal2
+  label_cal: 1gc2
+  uvrange: ''
+  set_model:
+    enable: true
+    meerkat_band: "UHF"
+    meerkat_crystalball_skymodel: true
+    meerkat_crystalball_ncpu: 30
+    meerkat_crystalball_memory_fraction: 0.75
+  primary:
+    order: KGBAKGB
+    combine: [' ', ' ', ' ', null, ' ', ' ', scan]
+    solint: [inf, inf, inf, null, 60s, 60s, inf]
+    calmode: [a, ap, ap, null, a, ap, ap] 
+    b_fillgaps: 70
+    plotgains: true
+  secondary:
+    order: KGAIKF
+    apply: B
+    combine: [" ", " ", null, null, " ", " "]
+    solint: [inf, inf, null, null, inf, inf]
+    calmode: [a, ap, null, null, a, ap]
+    plotgains: true
+    image:
+      padding: 1.8
+      mgain: 0.8
+      rms_window: 40
+      auto_mask: 7
+      auto_threshold: 1.2
+      niter: 1000000
+      fit_spectral_pol: 4
+  apply_cal:
+    applyto:
+      - gcal
+      - bpcal
+  report: true
+
+inspect: 
+  enable: true
+  label_in: cal2
+  field: calibrators
+  label_plot: 1gc2-shadems1
+  dirname: crosscal2-shadems1
+  num_cores: 20
+  mem_limit: 64GB
+  correlation: all
+  standard_plotter: none
+  shadems:   # these are just shadems commands
+    enable: true
+    plots:
+    # phaseball plots
+       #- "--dir phaseballs -x real -y imag -c CORR --corr I,Q,U,V --iter-field --cnum 100"
+       - "--dir phaseballs -x real -y imag -c SCAN_NUMBER --iter-field --cnum 100"
+       - "--dir phaseballs -x real -y imag -c ANTENNA1 --iter-field --cnum 100"
+
+       - "--dir phaseballs-bycorr -x real -y imag -c SCAN_NUMBER --iter-corr --iter-field --cnum 100"
+       - "--dir phaseballs-bycorr -x real -y imag -c ANTENNA1 --iter-corr --iter-field --cnum 100"
+       - "--dir phaseballs-bycorr -x amp -y phase -c SCAN_NUMBER --iter-corr --iter-field --cnum 100"
+       - "--dir phaseballs-bycorr -x amp -y phase -c ANTENNA1 --iter-corr --iter-field --cnum 100"
+    # normalized phaseballs
+       - "--dir normballs -x real -y imag -c SCAN_NUMBER --col CORRECTED_DATA/MODEL_DATA --corr XX,YY --iter-corr --iter-field --cnum 100"
+       - "--dir normballs -x real -y imag -c ANTENNA1 --col CORRECTED_DATA/MODEL_DATA --corr XX,YY --iter-corr --iter-field --cnum 100"
+    # block and triangle plots
+       - "--dir blockplots -x BASELINE_M -y FREQ -c amp --iter-field --cnum 100"
+       - "--dir blockplots -x ANTENNA1 -y ANTENNA2 -c SCAN_NUMBER --aaxis phase --ared std --iter-field --cnum 100"
+       - "--dir blockplots -x ANTENNA1 -y ANTENNA2 -c SCAN_NUMBER --aaxis amp --ared mean --iter-field --cnum 100"
+
+       - "--dir blockplots-byscan-stdphase -x ANTENNA1 -y ANTENNA2 -c phase --aaxis phase --ared std --iter-scan --cmin -5 --cmax 5 --amin -5 --amax 5 --cnum 100"
+
+       - "--dir blockplots-byscan-meanamp -x ANTENNA1 -y ANTENNA2 -c amp --aaxis amp --ared mean --iter-scan --cmin 0 --cmax 30 --amin 0 --amax 30 --cnum 100"
+    # amp/phase versus uv-distance, and uv-coverage coloured by amp/phase
+       - "--dir uvdist -x UV -y amp    -c SCAN_NUMBER --iter-field --cnum 100"
+       - "--dir uvdist -x UV -y amp    -c ANTENNA1 --iter-field --cnum 100"
+       - "--dir uvdist -x UV -y phase  -c SCAN_NUMBER --corr XX,YY --iter-field --cnum 100"
+       - "--dir uvdist -x UV -y phase  -c ANTENNA1 --corr XX,YY --iter-field --cnum 100"
+       - "--dir uvdist -x U  -y V      -c amp --iter-field --cnum 100"
+       - "--dir uvdist -x U  -y V      -c phase --cmin -5 --cmax 5 --iter-field --cnum 100"
+    # spectral plots
+       - "--dir spectra -x FREQ  -y amp  -c SCAN_NUMBER --iter-field --cnum 100"
+       - "--dir spectra -x FREQ  -y amp  -c ANTENNA1 --iter-field --cnum 100"
+       #- "--dir spectra -x FREQ  -y real -c CORR --corr I,Q,U,V --iter-field --cnum 100"
+       - "--dir spectra -x FREQ  -y phase -c SCAN_NUMBER --iter-field --cnum 100"
+       - "--dir spectra -x FREQ  -y phase -c ANTENNA1 --iter-field --cnum 100"
+    ignore_errors: true
+  report: true
+
+transform__2:
+  enable: true
+  label_out: corr3
+  split_field:
+    enable: true
+    chan_avg: 4
+    otfcal:
+      enable: true
+      label_cal: 1gc2
+
+prep__2:
+  enable: true
+  label_in: corr3
+  field: target
+
+flag__2:
+  enable: true
+  field: target
+  label_in: corr3
+  flag_autocorr:
+    enable: true
+  flag_shadow:
+    enable: true
+  flag_antennas:
+    enable: true
+    antennas: 'm008'
+  flag_spw:
+    enable: true
+    chans: '*:544~575MHz,*:915~960MHz,*:1005~1088MHz'
+    ensure_valid: false  
+  flag_rfi:
+    enable: true
+    flagger: tricolour
+    tricolour:
+      mode: manual
+      strategy: gorbachev.yaml
+  report: true
+ 

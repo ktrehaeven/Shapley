@@ -1,0 +1,382 @@
+_include:
+   - (cultcargo)breizorro.yml
+   - (cultcargo)quartical.yml
+   - omstimelation-cabs.yml
+   - MY_cabs.yml
+   - shapely-ddf-mosaic-lib.yaml
+  
+self_cal_and_vis_plane_mosaicing:
+  info: "Recipe detailing the steps used to reduce the MeerKAT data of the Shapley Supercluster presented in the paper: 3GC-Enabled visibility plane mosaicing and primary beam correction with MeerKAT, Trehaeven et al. (2025). Requires a virtual environment in which DDFacet and killMS have been installed. Point to this venv using the $virtual_env$ options in the oms-ddf-cabs.yaml cab definitions file. Additionally, point to the DDFacet and killMS stimela schema in the cloned repos using the $_include$ options in the same file. 
+  
+  Although this is a semi-automated recipe, some manual intervention required (and recommended) during masking and clustering. The basic logic is based on @cyriltasse's write-up here: https://github.com/cyriltasse/DDFacet/wiki/Creating-a-MeerKAT-DD-corrected-intrinsic-flux-image-with-DDF-kMS. It is recommended to inspect the output of each imaging round to ensure everything is going smoothly. The calibration of the individual pointings have the attribute tags: [single-pointing], and the mosaic has tag: [mosaic]. Steps that are indicated as OPTIONAL can be skipped or removed if you trust your masking"
+  inputs:
+    obs:
+      choices: [centre, west, mosaic]
+      info: "Selects observation set -- various settings will be auto-assigned base.ssd2d on this"
+      required: true
+      default: centre
+    suffix:
+      dtype: str
+      info: "Optional additional suffix for all output filenames, can be empty"
+      default: ''
+    dir_out: 
+      dtype: str
+      required: true
+      info: "Output directory for all data products"
+    ncpu:
+      info: "Number of CPUs to use"
+      default: 35
+      aliases: [(DDFacet).Parallel.NCPU, ddcal*.NCPU]
+    MS:
+      dtype: Union[MS, List[MS]]
+      info: "MS"
+      aliases: [(DDFacet).Data.MS] #, dical*.MSList #ddcal*.MSList,
+
+  assign_based_on:
+    obs:
+      centre:
+        MS: /net/simon/home/trehaeven/shapely_L_band/recalibrate.centre/msdir/A3562_centre-A3562-corr3.3.AVG.ms
+        dir_out: centre
+        log.dir: '{recipe.dir_out}/logs/log-{config.run.datetime}'
+        image_size: 9100
+        num_facets: 20
+        mask_di1_tight_threshold: 6.5
+        mask_di1_tight_boxsize: 50
+        mask_di1_loose_threshold: 10
+        mask_di1_loose_boxsize: 40
+        mask_di1_reg: mask_di1_centre.reg
+        mask_di2_tight_threshold: 6
+        mask_di2_tight_boxsize: 50
+        mask_di2_loose_threshold: 9.5
+        mask_di2_loose_boxsize: 40
+        mask_di2_reg: mask_di2_centre.reg
+      west:
+        MS: /net/simon/home/trehaeven/shapely_L_band/recalibrate.centre/msdir/A3562_centre-A3562-corr3.3.AVG.copy.ms
+        dir_out: west
+        log.dir: '{recipe.dir_out}/logs/log-{config.run.datetime}'
+        image_size: 9100
+        num_facets: 20
+        mask_di1_tight_threshold: 6.5
+        mask_di1_tight_boxsize: 50
+        mask_di1_loose_threshold: 10
+        mask_di1_loose_boxsize: 40
+        mask_di1_reg: mask_di1_west.reg
+        mask_di2_tight_threshold: 6
+        mask_di2_tight_boxsize: 50
+        mask_di2_loose_threshold: 10
+        mask_di2_loose_boxsize: 40
+        mask_di2_reg: mask_di2_west.reg
+      mosaic:
+        MS:
+          - /net/simon/home/trehaeven/shapely_L_band/recalibrate.centre/msdir/A3562_centre-A3562-corr3.3.AVG.ms
+          - /net/simon/home/trehaeven/shapely_L_band/recalibrate.centre/msdir/A3562_centre-A3562-corr3.3.AVG.copy.ms
+        dir_out: mosaic
+        image_size: 12000
+        num_facets: 26
+        centre:  "['13:32:41.5', '-31:41:17']"
+        precluster: tessels11.reg
+        clustercat: '{recipe.precluster}.ClusterCat.npy'
+        mask_di1_tight_threshold: 6
+        mask_di1_tight_boxsize: 40
+        mask_di1_loose_threshold: 12
+        mask_di1_loose_boxsize: 50
+        mask_di1_reg: mask_di1_mosaic.reg
+        mask_di2_tight_threshold: 6
+        mask_di2_tight_boxsize: 40
+        mask_di2_loose_threshold: 12
+        mask_di2_loose_boxsize: 50
+        mask_di2_reg: mask_di2_mosaic.reg
+
+  assign:
+    image-prefix: '{recipe.dir_out}/im-{info.suffix}/im-{info.suffix}'
+    pixel_scale: 1.2
+    image_nchan: 3
+    image_nchan_degrid: 32
+    image_nchan_beam: 32
+    beam_models: 'new_avg_beams.reverse/new_mkt_pb_avg_reverse_$(xy)_$(reim).fits'
+
+  steps:
+
+    flag-summ0:
+      info: "Print flagging stats"       
+      recipe: lib.recipes.flagsumm-multi
+      params:
+        MSList: '{recipe.MS}'
+      tags: [single-pointing]
+    
+    image-di1:
+      info: "Initial SSD2 deconvolution step"
+      _use: lib.steps.ddfacet.ssd2
+      tags: [single-pointing]
+
+    mask-di1_tight:
+      info: "Generate a deep mask"
+      cab: breizorro
+      params:
+        restored-image: '{steps.image-di1.app_restored_mfs}'
+        threshold: '{recipe.mask_di1_tight_threshold}'
+        boxsize: '{recipe.mask_di1_tight_boxsize}' 
+        mask-image: =STRIPEXT(current.restored_image) + '.mask{current.threshold}_{current.boxsize}.fits'
+        number-islands: true
+        make-binary: true
+        fill-holes: true
+      tags: [single-pointing]
+
+    mask-di1_loose:
+      info: "Generate a shallow mask - OPTIONAL"
+      cab: breizorro
+      params:
+        restored-image: '{steps.image-di1.app_restored_mfs}'
+        threshold: '{recipe.mask_di1_loose_threshold}'
+        boxsize: '{recipe.mask_di1_loose_boxsize}'
+        mask-image: =STRIPEXT(current.restored_image) + '.mask{current.threshold}_{current.boxsize}.fits'
+        number-islands: true
+        make-binary: true
+        fill-holes: true
+      tags: [single-pointing]
+
+    combine_masks1:
+      info: "Replace artefacts in the deep mask with the corresponding pixels in the shallow mask - OPTIONAL"
+      cab: replace_masked_reg
+      params:
+        mask1: '{steps.mask-di1_tight.mask}'
+        mask2: '{steps.mask-di1_loose.mask}'
+        reg_file: '{recipe.mask_di1_reg}'
+        outname: '{recipe.dir_out}/im-di1/combined_mask.fits'
+      tags: [single-pointing]
+      
+    image-di2:
+      info: "Deeper SSD2 deconvolution step using the new mask"
+      _use: lib.steps.ddfacet.ssd2
+      params: 
+        Predict.InitDicoModel: '{steps.image-di1.skymodel}'
+        Cache.Reset: 0
+        Cache.Dirty: forceresidual
+        Cache.PSF: force 
+        Deconv.MaxMajorIter: 1
+        Mask.Auto: 0
+        Mask.External: '{steps.combine_masks1.outname}'
+      tags: [single-pointing]
+       
+    predict-di2_predict:
+      info: "Predict the previous intrinsic primary beam corrected model back to apparent scale for self-calibration"
+      _use: lib.steps.ddfacet.predict-previous
+      tags: [single-pointing]
+
+    dical-1:
+      info: "Perform DI self-cal with QuartiCal"
+      recipe: lib.recipes.quartical-multi
+      params:
+        MSList: '{recipe.MS}'
+        model: '{steps.predict-di2_predict.Predict.ColName}'
+
+    save-flags0:
+      info: "Save flags and print stats"
+      recipe: lib.recipes.flagman-multi
+      params:
+        MSList: '{recipe.MS}'
+        flag_name: 'after_di1'
+        mode: save
+      tags: [single-pointing]
+
+    mask-di2_tight:
+      info: "Generate a deep mask"
+      cab: breizorro
+      params:
+        restored-image: '{steps.image-di2.app_restored_mfs}'
+        threshold: '{recipe.mask_di2_tight_threshold}'
+        mask-image: =STRIPEXT(current.restored_image) + '.mask{current.threshold}.fits'
+        number-islands: true
+        make-binary: true
+        fill-holes: true
+      tags: [single-pointing]
+      
+    mask-di2_loose:
+      info: "Generate a shallow mask - OPTIONAL"
+      cab: breizorro
+      params:
+        restored-image: '{steps.image-di2.app_restored_mfs}'
+        threshold: '{recipe.mask_di2_loose_threshold}'
+        boxsize: '{recipe.mask_di2_loose_boxsize}'
+        mask-image: =STRIPEXT(current.restored_image) + '.mask{current.threshold}_{current.boxsize}.fits'
+        number-islands: true
+        make-binary: true
+        fill-holes: true
+      tags: [single-pointing]
+      
+    combine_masks2:
+      info: "Replace artefacts in the deep mask with the corresponding pixels in the shallow mask - OPTIONAL"
+      cab: replace_masked_reg
+      params:
+        mask1: '{steps.mask-di2_tight.mask}'
+        mask2: '{steps.mask-di2_loose.mask}'
+        reg_file: '{recipe.mask_di2_reg}'
+        outname: '{recipe.dir_out}/im-di2/combined_mask.fits'
+      tags: [single-pointing]
+      
+    image-di3:
+      info: "Final DI self-cal'ed SSD2 deconvolution step using the new mask"
+      _use: lib.steps.ddfacet.ssd2
+      params:
+        Data.ColName: CORRECTED_DATA
+        Predict.InitDicoModel: '{steps.image-di2.skymodel}'
+        Deconv.MaxMajorIter: 1
+        Mask.Auto: 0
+        Mask.External: '{steps.combine_masks2.outname}'
+      tags: [single-pointing]
+      
+    mosaic-pre:
+      info: "Make a dirty image of the mosaic to define the clustering for DD cal" 
+      _use: lib.steps.ddfacet.ssd2
+      params:
+        Output.Mode: Dirty
+        Data.ColName: CORRECTED_DATA
+      tags: [mosaic]
+     
+    clustercat:
+      info: "Makes a node catalog file base.ssd2d on the mosaic-pre outputs and a pre-clustering. Run this once, after you've made the DS9 regions file"
+      cab: ddf_makemodel
+      params:
+        ds9PreClusterFile: '{recipe.precluster}'
+        BaseImageName: =previous.Output.Name
+      tags: [mosaic]
+
+    mosaic-di1:
+      info: "Initial SSD2 deconvolution step"
+      _use: lib.steps.ddfacet.ssd2
+      params:
+        Data.ColName: CORRECTED_DATA
+        Predict.ColName: MOSAIC_MODEL
+        Facets.CatNodes: '{recipe.clustercat}'
+        Facets.DiamMin: =recipe.pixel_scale * recipe.image_size / 3600 / recipe.num_facets / 2
+        Facets.DiamMax: =recipe.pixel_scale * recipe.image_size / 3600 / recipe.num_facets
+      tags: [mosaic]
+
+    mask-mosaic_di1_tight:
+      info: "Generate a deep mask"
+      cab: breizorro
+      params:
+        restored-image: "{steps.mosaic-di1.app_restored_mfs}"
+        threshold: '{recipe.mask_di1_tight_threshold}'
+        boxsize: '{recipe.mask_di1_tight_boxsize}'
+        mask-image: =STRIPEXT(current.restored_image) + '.mask{current.threshold}_{current.boxsize}.fits'
+        number-islands: true
+        make-binary: true
+        fill-holes: true
+      tags: [mosaic]
+
+    mask-mosaic_di1_loose:
+      info: "Generate a shallow mask - OPTIONAL"
+      cab: breizorro
+      params:
+        restored-image: '{steps.mosaic-di1.app_restored_mfs}'
+        threshold: '{recipe.mask_di1_loose_threshold}'
+        boxsize: '{recipe.mask_di1_loose_boxsize}'
+        mask-image: =STRIPEXT(current.restored_image) + '.mask{current.threshold}_{current.boxsize}.fits'
+        number-islands: true
+        make-binary: true
+        fill-holes: true
+      tags: [mosaic]
+ 
+    combine_masks3:
+      info: "Replace artefacts in the deep mask with the corresponding pixels in the shallow mask - OPTIONAL"
+      cab: replace_masked_reg
+      params:
+        mask1: '{steps.mask-mosaic_di1_tight.mask}'
+        mask2: '{steps.mask-mosaic_di1_loose.mask}'
+        reg_file: '{recipe.mask_di1_reg}'
+        outname: '{recipe.dir_out}/im-di1/combined_mask.fits'
+      tags: [mosaic]
+
+    mosaic-di2:
+      info: "Deeper SSD2 deconvolution step using the new mask"
+      _use: lib.steps.ddfacet.ssd2
+      params:
+        Data.ColName: '{steps.mosaic-di1.Data.ColName}'
+        Predict.ColName: '{steps.mosaic-di1.Predict.ColName}'
+        Predict.InitDicoModel: '{steps.mosaic-di1.skymodel}'
+        Cache.Reset: 0
+        Cache.Dirty: forceresidual
+        Cache.PSF: force
+        Facets.CatNodes: '{recipe.clustercat}'
+        Facets.DiamMin: =recipe.pixel_scale * recipe.image_size / 3600 / recipe.num_facets / 2
+        Facets.DiamMax: =recipe.pixel_scale * recipe.image_size / 3600 / recipe.num_facets
+        Deconv.MaxMajorIter: 1
+        Mask.Auto: 0
+        Mask.External: '{steps.combine_masks3.outname}'
+      tags: [mosaic]
+
+    mask-mosaic_di2_tight:
+      info: "Generate a deep mask"
+      cab: breizorro
+      params:
+        restored-image: "{steps.mosaic-di2.app_restored_mfs}"
+        threshold: '{recipe.mask_di2_tight_threshold}'
+        boxsize: '{recipe.mask_di2_tight_boxsize}'
+        mask-image: =STRIPEXT(current.restored_image) + '.mask{current.threshold}_{current.boxsize}.fits'
+        number-islands: true
+        make-binary: true
+        fill-holes: true
+      tags: [mosaic]
+
+    mask-mosaic_di2_loose:
+      info: "Generate a shallow mask - OPTIONAL"
+      cab: breizorro
+      params:
+        restored-image: '{steps.mosaic-di2.app_restored_mfs}'
+        threshold: '{recipe.mask_di2_loose_threshold}'
+        boxsize: '{recipe.mask_di2_loose_boxsize}'
+        mask-image: =STRIPEXT(current.restored_image) + '.mask{current.threshold}_{current.boxsize}.fits'
+        number-islands: true
+        make-binary: true
+        fill-holes: true
+      tags: [mosaic]
+ 
+    combine_masks4:
+      info: "Replace artefacts in the deep mask with the corresponding pixels in the shallow mask - OPTIONAL"
+      cab: replace_masked_reg
+      params:
+        mask1: '{steps.mask-mosaic_di2_tight.mask}'
+        mask2: '{steps.mask-mosaic_di2_loose.mask}'
+        reg_file: '{recipe.mask_di2_reg}'
+        outname: '{recipe.dir_out}/im-di2/combined_mask.fits'
+      tags: [mosaic]
+     
+    ddcal-1:
+      info: "DD-calibration using killMS"
+      recipe: lib.recipes.killms-multi
+      params:
+        MSList: '{recipe.MS}'
+        BaseImageName: '{steps.mosaic-di2.Output.Name}'
+        NChanSols: '{steps.mosaic-di2.Beam.NBand}'
+        NChanBeamPerMS: '{steps.mosaic-di2.Beam.NBand}'
+        dt: 5
+        OutSolsName: DD1.mosaic
+      tags: [mosaic]
+      
+    save-flags1:
+      info: "Save flags and print stats"
+      recipe: lib.recipes.flagman-multi
+      params:
+        MSList: '{recipe.MS}'
+        flag_name: 'after_dd1'
+        mode: save
+      tags: [mosaic]
+
+    mosaic-dd1:
+      info: "DD-imaging using solutions derived above"
+      _use: lib.steps.ddfacet.ssd2
+      params:
+        Data.ColName: '{steps.mosaic-di2.Data.ColName}'
+        DDESolutions.DDSols: '{steps.ddcal-1.OutSolsName}'
+        Predict.InitDicoModel: '{steps.mosaic-di2.skymodel}'
+        Predict.ColName: '{steps.mosaic-di2.Predict.ColName}.kMS1'
+        Facets.CatNodes: None
+        Facets.DiamMin: =recipe.pixel_scale * recipe.image_size / 3600 / recipe.num_facets / 2
+        Facets.DiamMax: =recipe.pixel_scale * recipe.image_size / 3600 / recipe.num_facets
+        Deconv.MaxMajorIter: 1
+        Mask.External: '{steps.combine_masks4.outname}'
+        Mask.Auto: 0
+        Weight.ColName: '[WEIGHT_SPECTRUM,IMAGING_WEIGHT]'
+      tags: [mosaic]
+

@@ -1,0 +1,14 @@
+# Region file format: DS9 CARTA 1.3
+global color=green delete=1 edit=1 fixed=0 font="helvetica 10 normal roman" highlite=1 include=1 move=1 select=1
+icrs
+circle(203.398957,-33.090331,65.00")
+circle(202.580189,-31.381773,65.00")
+circle(203.406389,-31.513134,65.00")
+circle(202.927688,-32.109134,65.00")
+circle(201.410724,-32.598654,65.00")
+circle(204.002053,-30.710068,65.00")
+circle(202.424543,-31.978026,65.00")
+circle(202.130202,-31.584120,65.00")
+circle(203.424849,-30.954418,65.00")
+circle(202.662108,-30.878479,65.00")
+circle(204.324227,-32.075001,65.00")
