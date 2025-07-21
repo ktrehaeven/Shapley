@@ -1,4 +1,6 @@
 # Shapley
-For all my shapley scripts and issues
+For all my Shapley scripts and issues
 #
-The A3562_centre3.3.yml and A3562_west.yaml scripts are the CARACal 1GC recipes. Please refer to the CARACal docs on how to run them.
+The files are separated by observing band and reduction software. For imaging with DDFacet, the primary beam models need to be generated from scratch using the make_new_mkt_pb_files.avg_only.py script. I suggest making separate virtual environments for caracal, stimela and DDFacet+killMS. Please refer to the CARACal and Stimela2 docs for how to run the scripts.
+
+
