@@ -1,0 +1,245 @@
+opts:
+  log:
+    dir: './{root.dir_out}/logs/log-{config.run.datetime}'
+    name: log-{info.fqname}.txt
+    nest: 2
+    symlink: log
+
+lib:
+  steps:
+    ddfacet:
+      base:
+        info: "Base DDFacet command"
+        cab: DDFacet
+        params:
+          Data.ColName: DATA
+          Data.ChunkHours: 2
+          Data.Sort: True
+          Predict.ColName: MODEL_DATA
+          Output.Name: '{recipe.image-prefix}' 
+          Output.Images: all
+          Output.Cubes: all
+          Image.Cell: '{recipe.pixel_scale}'
+          Image.NPix: '{recipe.image_size}'
+          Cache.Reset: 1
+          Cache.Dir: ./
+          Facets.NFacets: '{recipe.num_facets}'
+          Freq.NBand: '{recipe.image_nchan}'
+          Freq.NDegridBand: '{recipe.image_nchan_degrid}'
+          Beam.Model: FITS #
+          Beam.NBand: '{recipe.image_nchan_beam}'
+          Beam.FITSParAngleIncDeg: 0.5 
+          Beam.DtBeamMin: 5 
+          Beam.FITSFile: '{recipe.beam_models}' 
+          Beam.CenterNorm: 1 
+          Beam.Smooth: 1 
+          Beam.FITSFeed: xy 
+          Beam.FITSFeedSwap: 1  
+          Beam.ApplyPJones: 1 
+          Beam.FlipVisibilityHands: 1 
+          RIME.DecorrMode: FT
+          
+      ssd2:
+        info: "Base SSD2 parameters"
+        _use: lib.steps.ddfacet.base
+        params:
+          Deconv.Mode: SSD2
+          Deconv.MaxMajorIter: 2
+          Deconv.RMSFactor: 3.0
+          Deconv.PeakFactor: 0.01
+          Mask.Auto: 1
+          SSD2.PolyFreqOrder: 3
+          Log.Memory: True
+          Log.Boring: False
+
+      predict-previous:
+        info: "predicts sky model from imaging step directly preceding this one"
+        _use: lib.steps.ddfacet.base
+        params:
+          Output.Mode: Predict
+          Predict.InitDicoModel: =previous.skymodel
+          Predict.ColName: '{previous.Predict.ColName}_app' 
+          Facets.CatNodes: =IFSET(previous.Facets.CatNodes)
+          DDESolutions.DDSols: =IFSET(previous.DDESolutions.DDSols)
+    
+    qc:
+      base:
+        info: "Base QuartiCal command"
+        cab: quartical
+        params:
+          input_ms.data_column: DATA
+          input_ms.sigma_column: SIGMA_SPECTRUM
+          input_ms.select_uv_range: [150, 0]
+          input_model.recipe: MODEL_DATA
+          output.gain_directory: '{recipe.dir_out}/gains.qc'
+          output.log_directory: '{recipe.dir_out}/logs.qc'
+          output.products: [corrected_data]
+          output.columns: [CORRECTED_DATA]
+          solver.terms: [K, G]
+          solver.iter_recipe: [50,50,50,50,50,50]
+          solver.robust: true
+          solver.threads: 5
+          dask.threads: 5
+          K.type: delay_and_offset
+          K.time_interval: '8s'
+          K.freq_interval: 0
+          G.type: diag_complex
+          G.time_interval: '180s'
+          G.freq_interval: 256
+          
+    killms:
+      base:
+        info: 'Base killMS command'
+        cab: killMS
+        params:
+          InCol: CORRECTED_DATA
+          FieldID: 0
+          TChunk: 1
+          SolverType: KAFCA
+          PolMode: Scalar
+          UVMinMax: '[0.15, 2000]'
+          # this needs to be consistent with DDF Beam-xxx params 
+          BeamModel: FITS
+          FITSParAngleIncDeg: 0.5
+          FITSFile: '{recipe.beam_models}' 
+          CenterNorm: 1
+          FITSFeed: xy
+          FITSFeedSwap: 1
+          ApplyPJones: 1
+          FlipVisibilityHands: 1
+          
+#--------------------------------------------------------------
+  recipes:
+
+    flagsumm-multi:
+      name: casa-flagsummary-loop
+      info: run casa's flagsum task on a series of MSs
+      inputs:
+        MSList:
+          dtype: Union[MS, List[MS]]
+      for_loop:
+        var: ms
+        over: MSList
+      assign:
+        opts.log.name: 'log-{info.fqname}-ms{recipe.ms@index}.txt'
+      steps:
+        flagsummary:
+          cab: flagsummary
+          params:
+            vis: '{recipe.ms}'
+
+    flagman-multi:
+      name: casa-flagmanager-loop
+      info: run casa's flagman task on a series of MSs
+      inputs:
+        MSList:
+          dtype: Union[MS, List[MS]]
+        flag_name:
+          dtype: str
+          default: after_selfcal1
+        mode:
+          dtype: str
+      for_loop:
+        var: ms
+        over: MSList
+      assign:
+        opts.log.name: 'log-{info.fqname}-ms{recipe.ms@index}.txt'
+      steps:
+        flagman:
+          cab: flagman
+          params:
+            vis: '{recipe.ms}'
+            versionname: '{recipe.flag_name}'
+            mode: '{recipe.mode}'
+        flagsummary:
+          cab: flagsummary
+          params:
+            vis: '{recipe.ms}'
+
+    quartical-multi:
+      name: quartical-loop
+      info: runs quartical on a series of MSs
+      inputs:
+        MSList:
+          dtype: Union[MS, List[MS]]
+        model:
+          default: MODEL_DATA
+          aliases: ['(quartical).input_model.recipe']
+        gain_dir:
+          default: '{recipe.dir_out}'
+          aliases: ['(quartical).output.gain_directory']
+      for_loop:
+        var: ms
+        over: MSList
+      assign:
+        opts.log.name: 'log-{info.fqname}-ms{recipe.ms@index}.txt'
+      steps:
+        QC:
+          info: invokes quartical on a single MS
+          _use: lib.steps.qc.base
+          params:
+            input_ms.path: '{recipe.ms}'
+            output.gain_directory: '{recipe.dir_out}/gains_ms{recipe.ms@index}.qc'
+
+    killms-multi:
+      name: killms-loop
+      info: runs killMS on a series of MSs
+      inputs:
+        MSList:
+          dtype: Union[MS, List[MS]]
+        BaseImageName:
+          aliases: ['(killMS).BaseImageName']
+        NCPU:
+          aliases: ['(killMS).NCPU']
+        OutSolsName:
+          aliases: ['(killMS).OutSolsName']
+        dt:
+          aliases: ['(killMS).dt']
+        NChanSols:
+          aliases: ['(killMS).NChanSols']
+        NChanBeamPerMS:
+          aliases: ['(killMS).NChanBeamPerMS']
+      for_loop:
+        var: ms
+        over: MSList
+      assign:
+        opts.log.name: 'log-{info.fqname}-ms{recipe.ms@index}.txt'
+      steps:
+        kms:
+          info: invokes killMS on a single MS
+          _use: lib.steps.killms.base
+          params:
+            MSName: '{recipe.ms}'
+
+    subtract-multi:
+      name: subtraction-loop
+      info: subtract col2 from col1 per ms
+      inputs:
+        MSList:
+          dtype: Union[MS, List[MS]]
+        col1:
+          dtype: str
+          aliases: ['(sumcol).col1']
+        col2:
+          dtype: str
+          aliases: ['(sumcol).col2']
+        outcol:
+          dtype: str
+          aliases: ['(sumcol).outcol']  
+      for_loop:
+        var: ms
+        over: MSList
+      assign:
+        opts.log.name: 'log-{info.fqname}-ms{recipe.ms@index}.txt'
+      steps:
+        subtraction:
+          cab: sumcol
+          info: "subtract col2 from col1"
+          params:
+            msname: '{recipe.ms}'
+            subtract: true
+
+            
+            
+
+
